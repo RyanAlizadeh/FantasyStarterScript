@@ -1,0 +1,18 @@
+# Dependencies for the roster-value app (fantasy_value.py + app.py)
+#
+# Local CLI on a personal machine:
+#   python -m venv venv
+#   venv\Scripts\activate            (Windows)   or   source venv/bin/activate  (mac/Linux)
+#   pip install -r requirements.txt
+#   python fantasy_value.py --force-default
+#
+# Local web UI:  streamlit run app.py
+# Cloud deploy:  see DEPLOY.md
+streamlit>=1.36
+pandas>=2.0
+requests==2.32.5
+tabulate==0.9.0
+truststore==0.10.4
+# only needed if you use the live-Yahoo roster path (not required for --force-default):
+yahoo_fantasy_api==2.12.0
+yahoo-oauth==2.1.1
