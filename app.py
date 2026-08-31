@@ -2,11 +2,8 @@
 """
 app.py — Streamlit web UI for the roster value projections.
 
-Roster source (sidebar):
-  * Yahoo (live)   -> pulls your current roster from Yahoo so trades/adds/drops show
-                      up automatically. Needs Yahoo creds in Streamlit secrets (see
-                      DEPLOY.md). Falls back to the hardcoded roster on any error.
-  * Hardcoded      -> the built-in DEFAULT_ROSTER.
+Uses the built-in roster (fv.DEFAULT_ROSTER). When you make a trade/add/drop, update
+DEFAULT_ROSTER in fantasy_value.py and re-upload that file.
 
 Odds source (sidebar):
   * Upload saved file  -> reuse a snapshot (.json) or odds-lines (.csv); 0 API calls
@@ -21,7 +18,6 @@ Deploy:      see DEPLOY.md
 """
 import os
 import json
-import tempfile
 import requests
 import pandas as pd
 import streamlit as st
@@ -42,55 +38,6 @@ INACTIVE_SLOTS = fv.SKIP_SLOTS
 SHORT_INV = {v: k for k, v in fv.SHORT.items()}
 
 
-# ------------------------------------------------------------------ roster
-def _write_yahoo_oauth_file() -> str:
-    """Reconstruct an oauth2.json in a temp dir from Streamlit secrets [yahoo]."""
-    y = st.secrets["yahoo"]  # raises if the section is missing
-    data = {
-        "consumer_key": y["consumer_key"],
-        "consumer_secret": y["consumer_secret"],
-        "access_token": y.get("access_token", ""),
-        "refresh_token": y["refresh_token"],
-        "token_type": y.get("token_type", "bearer"),
-        "token_time": float(y.get("token_time", 0) or 0),
-    }
-    if "redirect_uri" in y:
-        data["redirect_uri"] = y["redirect_uri"]
-    if "guid" in y:
-        data["guid"] = y["guid"]
-    path = os.path.join(tempfile.gettempdir(), "oauth2_yahoo.json")
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f)
-    return path
-
-
-@st.cache_data(ttl=3600, show_spinner="Loading Yahoo roster…")
-def load_yahoo_cached(week_key: str):
-    """Cached Yahoo roster pull (refreshes hourly). Returns (roster|None, err|None)."""
-    try:
-        path = _write_yahoo_oauth_file()
-    except Exception as e:  # noqa: BLE001
-        return None, f"Yahoo secrets missing/invalid: {type(e).__name__}: {e}"
-    try:
-        roster = fv.load_yahoo_roster(oauth_path=path, raise_errors=True)
-        if not roster:
-            return None, "Yahoo returned an empty roster."
-        return fv.enrich_roster(roster), None
-    except Exception as e:  # noqa: BLE001
-        return None, f"{type(e).__name__}: {e}"
-
-
-def get_roster(source: str, week: str):
-    """Return (roster, label, warning|None)."""
-    if source == "Hardcoded":
-        return list(fv.DEFAULT_ROSTER), "Hardcoded", None
-    roster, err = load_yahoo_cached(week)
-    if roster:
-        return roster, "Yahoo (live)", None
-    return list(fv.DEFAULT_ROSTER), "Hardcoded (fallback)", err
-
-
-# ------------------------------------------------------------------ odds
 @st.cache_data(ttl=6 * 3600, show_spinner="Pulling odds…")
 def pull_odds(week_key: str, roster_json: str):
     """Full-roster live pull, cached by (week, roster). Returns (odds_by_event, err)."""
@@ -152,12 +99,9 @@ st.caption("Market-implied weekly projections (half-PPR) from The Odds API, with
            "season-baseline fallback and a per-player confidence score.")
 
 week = fv.nfl_week_key()
+roster = list(fv.DEFAULT_ROSTER)
 
 with st.sidebar:
-    st.header("Roster")
-    roster_source = st.radio("Roster source", ["Yahoo (live)", "Hardcoded"], index=0,
-                             help="Yahoo reflects trades/adds automatically. "
-                                  "Falls back to the built-in roster if Yahoo fails.")
     st.header("View")
     view = st.radio("Show", ["All", "Starters", "Bench"], horizontal=True, index=0)
 
@@ -176,12 +120,6 @@ with st.sidebar:
         if st.button("↻ Force re-pull (clear cache)"):
             st.cache_data.clear()
             st.session_state["live_on"] = week
-
-# ---- resolve roster
-roster, roster_label, roster_warn = get_roster(
-    "Hardcoded" if roster_source == "Hardcoded" else "Yahoo", week)
-if roster_warn:
-    st.warning(f"Yahoo roster unavailable — using hardcoded roster. ({roster_warn})")
 
 # ---- resolve odds
 props, raw, err, note = {}, None, None, None
@@ -221,7 +159,7 @@ elif view == "Bench":
 else:
     df_view = df
 
-st.caption(f"Roster: **{roster_label}**  ·  NFL week {week}")
+st.caption(f"NFL week {week}")
 st.dataframe(
     df_view, hide_index=True, use_container_width=True,
     column_config={
