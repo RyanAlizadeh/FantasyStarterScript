@@ -48,7 +48,11 @@ def pull_odds(week_key: str):
     try:
         with requests.Session() as s:
             events = fv.get_events(key, s)                          # free call
-            plan, _ = fv.build_plan(fv.DEFAULT_ROSTER, events, starters_only=False)
+            plan, skipped = fv.build_plan(fv.DEFAULT_ROSTER, events, starters_only=False)
+            if not plan:
+                why = "; ".join(f"{n} ({r})" for n, r in skipped[:3])
+                return {}, ("No games within ~9 days to pull — player props are only "
+                            f"posted about a week before kickoff. e.g. {why}")
             return fv.fetch_props(key, plan, s), None
     except Exception as e:  # noqa: BLE001 - surface any failure to the UI
         return {}, f"{type(e).__name__}: {e}"

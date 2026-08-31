@@ -269,15 +269,31 @@ def get_events(key, session):
     r.raise_for_status()
     return r.json()
 
-def build_plan(roster, events, starters_only=False):
+def _days_out(event):
+    """Days from now until an event's commence_time (None if unparseable)."""
+    cs = event.get("commence_time")
+    if not cs:
+        return None
+    try:
+        dt = datetime.datetime.fromisoformat(cs.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return (dt - datetime.datetime.now(datetime.timezone.utc)).total_seconds() / 86400.0
+
+def build_plan(roster, events, starters_only=False, max_days_out=9):
     """One entry per unique game -> the union of markets my players there need.
+
+    The Odds API returns the whole upcoming schedule, so we map each team to its
+    SOONEST game (books only post player props ~days before kickoff). Games further
+    than `max_days_out` away are skipped — they have no lines yet (or it's a bye).
 
     Returns (plan, skipped) where plan[event_id] = {event, markets(set), players[list]}.
     """
     ev_by_team = {}
-    for e in events:
-        ev_by_team[e.get("home_team")] = e
-        ev_by_team[e.get("away_team")] = e
+    for e in sorted(events, key=lambda e: e.get("commence_time") or "9999"):
+        for team in (e.get("home_team"), e.get("away_team")):
+            if team and team not in ev_by_team:      # first (soonest) game per team
+                ev_by_team[team] = e
 
     plan, skipped = {}, []
     for p in roster:
@@ -291,7 +307,10 @@ def build_plan(roster, events, starters_only=False):
         full = ABBR_TO_TEAM.get((p.get("team") or "").upper())
         e = ev_by_team.get(full) if full else None
         if not e:
-            skipped.append((p.get("name"), f"no game this week ({p.get('team')})")); continue
+            skipped.append((p.get("name"), f"no upcoming game ({p.get('team')})")); continue
+        d = _days_out(e)
+        if d is not None and d > max_days_out:
+            skipped.append((p.get("name"), f"next game ~{d:.0f}d out — no lines yet / bye")); continue
         entry = plan.setdefault(e["id"], {"event": e, "markets": set(), "players": []})
         entry["markets"].update(MARKETS_BY_POS.get(norm_pos(p.get("pos")), []))
         entry["players"].append(p.get("name"))
