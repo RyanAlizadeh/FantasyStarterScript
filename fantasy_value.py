@@ -460,11 +460,14 @@ def project_player(p, odds):
 # ---------------------------------------------------------------------------
 # Yahoo roster (best effort)
 # ---------------------------------------------------------------------------
-def load_yahoo_roster():
+def load_yahoo_roster(oauth_path=None, raise_errors=False):
+    """Fetch the live roster from Yahoo. Returns a list of player dicts, or None on
+    failure (unless raise_errors=True, in which case the exception propagates so the
+    caller can show the real message — used by the Streamlit app)."""
     try:
         from yahoo_oauth import OAuth2
         import yahoo_fantasy_api as yfa
-        sc = OAuth2(None, None, from_file=os.path.join(HERE, "oauth2.json"))
+        sc = OAuth2(None, None, from_file=oauth_path or os.path.join(HERE, "oauth2.json"))
         if not sc.token_is_valid():
             sc.refresh_access_token()
         tm = yfa.Team(sc, TEAM_KEY)
@@ -487,9 +490,33 @@ def load_yahoo_roster():
             })
         return out
     except Exception as e:
+        if raise_errors:
+            raise
         print(f"[warn] Yahoo roster fetch failed ({type(e).__name__}: {e}). "
               f"Falling back to DEFAULT_ROSTER.", file=sys.stderr)
         return None
+
+# ---------------------------------------------------------------------------
+# Baseline library: lets a live-Yahoo roster reuse the season projections/stats
+# that power the baseline + confidence for players we already know.
+# ---------------------------------------------------------------------------
+def baseline_library():
+    return {norm_name(p["name"]): {"proj": p.get("proj"), "stats": p.get("stats")}
+            for p in DEFAULT_ROSTER}
+
+def enrich_roster(roster):
+    """Fill proj/stats on a live roster from the baseline library where the player
+    name matches. New players (e.g. just-traded-for) keep proj/stats = None and will
+    be odds-only until added to DEFAULT_ROSTER. Mutates and returns roster."""
+    lib = baseline_library()
+    for p in roster:
+        b = lib.get(norm_name(p.get("name")))
+        if b:
+            if p.get("proj") is None:
+                p["proj"] = b["proj"]
+            if p.get("stats") is None:
+                p["stats"] = b["stats"]
+    return roster
 
 # ---------------------------------------------------------------------------
 def main():
